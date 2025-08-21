@@ -88,6 +88,7 @@ The demo also includes [TCP client-server application](docker/client-server/src/
     ```
 
     This command compiles the socket wrapper and the TCP client-server application into a container image.
+    To compile only the library, use `make libsocket_wrapper.so`.
 
 3. Deploy the Client and Server
 

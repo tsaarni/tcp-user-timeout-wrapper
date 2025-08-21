@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <dlfcn.h>
 #include <sys/socket.h>
@@ -27,7 +28,7 @@ int socket(int domain, int type, int protocol) {
     if ((domain == AF_INET || domain == AF_INET6) &&
         (type & 0xF) == SOCK_STREAM &&
         (protocol == 0 || protocol == IPPROTO_TCP)) {
-      // Check if environment variable is set.
+      // Check if user has set TCP_USER_TIMEOUT_MS to enable the timeout.
       const char *timeout_env = getenv("TCP_USER_TIMEOUT_MS");
       if (timeout_env) {
         int timeout = atoi(timeout_env);
