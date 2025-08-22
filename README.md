@@ -4,8 +4,8 @@ This project demonstrates how to use a socket wrapper to implement TCP user time
 
 ## Background
 
-When a TCP peer becomes unreachable, the TCP stack starts retransmitting the last segment.
-On Linux, the number of retransmissions is controlled by the sysctl parameter `net.ipv4.tcp_retries2` ([man 7 tcp](https://man7.org/linux/man-pages/man7/tcp.7.html)):
+When a TCP peer becomes unreachable, the TCP/IP stack starts retransmitting the last segment.
+On Linux, the number of retransmissions is controlled by the [sysctl](https://www.kernel.org/doc/Documentation/sysctl/net.txt) parameter `net.ipv4.tcp_retries2` ([man 7 tcp](https://man7.org/linux/man-pages/man7/tcp.7.html)):
 
        tcp_retries2 (integer; default: 15; since Linux 2.2)
 
@@ -18,13 +18,15 @@ On Linux, the number of retransmissions is controlled by the sysctl parameter `n
 
 
 For many applications, the default retransmission period is too long.
-For example, if a database server becomes unreachable, an application may need to detect the failure quickly in order to fail over to a backup server.
-See [When TCP sockets refuse to die](https://blog.cloudflare.com/when-tcp-sockets-refuse-to-die/) for more information on the problem.
+For example, if a database server becomes unreachable, an application may need to detect the failure quickly to fail over to a backup server.
+See [When TCP sockets refuse to die](https://blog.cloudflare.com/when-tcp-sockets-refuse-to-die/) for more information about this problem.
+
 
 Modifying the sysctl parameter directly requires elevated permissions, which are typically not available to applications.
 In Kubernetes, it is not possible to change `net.ipv4.tcp_retries2` through a pod's `securityContext` ([link](https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/#safe-and-unsafe-sysctls)), unless the cluster administrator adds the sysctl to the kubelet's `--allowed-unsafe-sysctls` parameter on all nodes.
 
-An alternative is to use the `TCP_USER_TIMEOUT` socket option, which allows applications to specify a timeout for TCP retransmissions per socket ([man 7 tcp](https://man7.org/linux/man-pages/man7/tcp.7.html)):
+
+An alternative is to use the `TCP_USER_TIMEOUT` socket option, which allows applications to specify a timeout for TCP retransmissions on a per-socket basis ([man 7 tcp](https://man7.org/linux/man-pages/man7/tcp.7.html)):
 
        TCP_USER_TIMEOUT (since Linux 2.6.37)
 
@@ -66,12 +68,28 @@ An alternative is to use the `TCP_USER_TIMEOUT` socket option, which allows appl
 This socket option is specific to Linux and is not available in OpenJDK.
 It is rarely found in Java applications or libraries, unless they use native code via JNI.
 
-This project provides a way to set `TCP_USER_TIMEOUT` using an `LD_PRELOAD` library.
-The library intercepts `socket()` calls and sets the `TCP_USER_TIMEOUT` socket option on all created sockets.
+This project provides a way to set `TCP_USER_TIMEOUT` using an [`LD_PRELOAD`](https://man7.org/linux/man-pages/man8/ld.so.8.html) library.
+The library intercepts `socket()` calls and sets the `TCP_USER_TIMEOUT` socket option using [`setsockopt()`](https://man7.org/linux/man-pages/man2/setsockopt.2.html) on all created sockets.
 See [`socket_wrapper.c`](socket_wrapper.c) for the implementation.
 Alternatively, the timeout could be set by overriding `connect()` (for clients) and/or `bind()` (for servers).
 
-The demo also includes [TCP client-server application](docker/client-server/src/main/java/io/github/tsaarni/tcpapp/TcpApp.java) in Java and Kubernetes [manifests](manifests) for deployment.
+The demo also includes a [TCP client-server application](docker/client-server/src/main/java/io/github/tsaarni/tcpapp/TcpApp.java) implemented in Java and Kubernetes [manifests](manifests) for deployment.
+The command line in [`client.yaml`](manifests/client.yaml) to start the client application with the timeout set is as follows:
+```
+LD_PRELOAD=/app/libsocket_wrapper.so TCP_USER_TIMEOUT_MS=5000 java -jar tcpapp.jar client tcp-server:12345
+```
+
+
+The `LD_PRELOAD` environment variable is used to load `libsocket_wrapper.so` to override the default C library `socket()` behavior.
+The `TCP_USER_TIMEOUT_MS` variable is set to 5000 milliseconds to configure the timeout for the client application.
+
+
+If starting the client application via a script, export the environment variables so they take effect in child processes:
+```
+export LD_PRELOAD=/app/libsocket_wrapper.so
+export TCP_USER_TIMEOUT_MS=5000
+/my/app/my-client-app.sh
+```
 
 ## Demo Steps
 
@@ -110,7 +128,7 @@ The demo also includes [TCP client-server application](docker/client-server/src/
     kubectl logs -l app=tcp-client -f
     ```
 
-    The logs will show that after sending a ping, the client experiences a timeout after 5 seconds (set via `TCP_USER_TIMEOUT`) and attempts to reconnect:
+    The logs will show that after sending a ping, the client experiences a timeout after 5 seconds (set via `TCP_USER_TIMEOUT`) and then attempts to reconnect:
 
     ```
     09:39:48.228 INFO  [main] i.g.t.tcpapp.TcpApp - Sending: ping
